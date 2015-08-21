@@ -1,0 +1,30 @@
+name:                huffman-bytestring
+version:             0.1.0.0
+synopsis:            Huffman compression of ByteStrings
+description:         Efficient compression of ByteStrings on a per-byte level.
+license:             MIT
+license-file:        LICENSE
+author:              Ivan Lazar Miljenovic
+maintainer:          Ivan.Miljenovic@gmail.com
+-- copyright:
+category:            Compression
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+
+source-repository head
+  type: git
+  location: git://github.com/ivan-m/huffman-bytestring.git
+
+library
+  exposed-modules:     Data.Compression.Huffman.ByteString
+  -- other-modules:
+  -- other-extensions:
+  build-depends:       base >=4 && <5
+                     , bits >= 0.3.2 && < 0.5
+                     , bytestring >= 0.10.2.0 && < 0.11
+                     , containers < 0.6
+                     , pqueue >= 1.3.0 && < 1.4.0
+  hs-source-dirs:      src
+  default-language:    Haskell2010
