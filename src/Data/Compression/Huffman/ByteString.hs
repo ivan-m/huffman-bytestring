@@ -13,13 +13,14 @@ module Data.Compression.Huffman.ByteString where
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy    as L
 
+import           Data.Bits
 import           Data.Function   (on)
-import           Data.List       (sortBy)
+import           Data.List       (mapAccumL, sortBy)
 import qualified Data.Map        as M
 import           Data.Monoid
 import qualified Data.PQueue.Min as P
 import           Data.Tuple      (swap)
-import           Data.Word       (Word16, Word8)
+import           Data.Word       (Word, Word16, Word8)
 
 -- -----------------------------------------------------------------------------
 
@@ -89,13 +90,81 @@ canonicalLengths = M.elems . go 0 blankLookup
                              in d1 `seq` go d1 (go d1 m t1) t2
 
 blankLookup :: (Num a) => M.Map Word8 a
-blankLookup = M.fromList $ zip [minBound .. maxBound] (repeat 0)
+blankLookup = M.fromList $ zip allBytes (repeat 0)
+
+allBytes :: [Word8]
+allBytes = [minBound .. maxBound]
 
 -- -----------------------------------------------------------------------------
-
-type Code = Int
 
 readDictionary :: LazyByteString -> M.Map Word8 Code
 readDictionary = undefined
 
--- readInDict :: LazyByteString ->
+-- | Construct the raw version of the dictionary from the canonical
+-- representation.
+--
+-- Do /not/ rely upon the ordering of the returned list.
+calculateCodes :: LazyByteString -> [(Word8, Code)]
+calculateCodes = assignCodes
+                 . codeOrder
+                 . readInDict
+
+-- Takes advantage of the fact that sortBy is a stable sort: the
+-- sorted result of @[(foo,len), (bar,len)]@ is the same.
+codeOrder :: [Word16] -> [(Word8, Word16)]
+codeOrder = sortBy (compare `on` snd) . zip allBytes
+
+readInDict :: LazyByteString -> [Word16]
+readInDict bs = maybe (error "Provided dictionary should have even length")
+                      (const ls)
+                      mb
+  where
+    (mb, ls) = L.foldr go (Nothing,[]) bs
+
+    go b (Nothing, ws) = (Just (fromIntegral b `shiftL` 8), ws)
+    go b (Just w, ws)  = (Nothing, (fromIntegral b .|. w) : ws)
+
+assignCodes :: [(Word8, Word16)] -> [(Word8, Code)]
+assignCodes []            = error "Should be non-empty dictionary"
+assignCodes ((w0,l0):wls) = ((w0,c0):)
+                            . snd
+                            . mapAccumL getCode c0
+                            $ wls
+  where
+    c0 = padCode l0 initCode
+
+    getCode c (w,l) = (c', (w, c'))
+      where
+        c' = padCode l (incCode c)
+
+-- | Representation of a code string.  This is needed rather than a
+-- raw 'Word' as we need to record the length, especially for the @0@
+-- code word case to know how long it is.
+data Code = C { code :: !Word
+              , cLen :: {-# UNPACK  #-} !Word16
+              }
+          deriving (Eq, Ord, Show, Read)
+
+initCode :: Code
+initCode = C { code = 0
+             , cLen = 0
+             }
+
+incCode :: Code -> Code
+incCode c = C cw' l'
+  where
+    cw' = succ (code c)
+    -- Rather than fiddling with "has it gotten longer", just
+    -- re-calculate it.
+    l' = binaryLength cw'
+
+padCode :: Word16 -> Code -> Code
+padCode l c
+  | cl >= l   = c
+  | otherwise = C (shiftL (code c) (fromIntegral $ l - cl)) l
+  where
+    cl = cLen c
+
+binaryLength :: Word -> Word16
+binaryLength 0 = 1
+binaryLength n = 1 + floor (logBase (2::Double) (fromIntegral n))
