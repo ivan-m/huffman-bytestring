@@ -13,9 +13,11 @@ module Data.Compression.Huffman.ByteString where
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Lazy    as L
 
+import           Control.Arrow   (second, (***))
 import           Data.Bits
+import           Data.Bool       (bool)
 import           Data.Function   (on)
-import           Data.List       (mapAccumL, sortBy)
+import           Data.List       (foldl', mapAccumL, partition, sortBy)
 import qualified Data.Map        as M
 import           Data.Monoid
 import qualified Data.PQueue.Min as P
@@ -95,6 +97,9 @@ blankLookup = M.fromList $ zip allBytes (repeat 0)
 allBytes :: [Word8]
 allBytes = [minBound .. maxBound]
 
+numBits :: Int
+numBits = finiteBitSize (minBound :: Word8)
+
 -- -----------------------------------------------------------------------------
 
 readDictionary :: LazyByteString -> M.Map Word8 Code
@@ -121,7 +126,7 @@ readInDict bs = maybe (error "Provided dictionary should have even length")
   where
     (mb, ls) = L.foldr go (Nothing,[]) bs
 
-    go b (Nothing, ws) = (Just (fromIntegral b `shiftL` 8), ws)
+    go b (Nothing, ws) = (Just (fromIntegral b `shiftL` numBits), ws)
     go b (Just w, ws)  = (Nothing, (fromIntegral b .|. w) : ws)
 
 assignCodes :: [(Word8, Word16)] -> [(Word8, Code)]
@@ -169,3 +174,37 @@ padCode l c
 binaryLength :: Word -> Int
 binaryLength 0 = 1
 binaryLength n = 1 + floor (logBase (2::Double) (fromIntegral n))
+
+-- -----------------------------------------------------------------------------
+
+data DTree = Branch DTree DTree
+           | Value Word8
+           deriving (Eq, Ord, Show, Read)
+
+codesToTree :: [(Word8,Code)] -> DTree
+codesToTree []      = error "Cannot create empty tree"
+codesToTree [(w,_)] = Value w
+codesToTree wcs     = uncurry Branch
+                      . (toT *** toT)
+                      . partition (snd . snd)
+                      . map getMSB
+                      $ wcs
+  where
+    toT = codesToTree . map (second fst)
+
+    getMSB = second splitMSB
+
+    splitMSB c@(C cw l) = (c {cLen = pred l}, testBit cw l)
+
+-- TODO: work out how to deal with trailing 0s on the end so we don't
+-- spuriously try to convert those to valid values.
+decode :: DTree -> LazyByteString -> LazyByteString
+decode dt = B.toLazyByteString
+            . snd
+            . L.foldl' decodeByte (dt, mempty)
+  where
+    decodeByte tb byte = foldl' decodeBit tb (map (testBit byte) [0..numBits - 1])
+
+    decodeBit (Branch lt rt, bld) b = case bool lt rt b of
+                                        Value w -> (dt, bld `mappend` B.word8 w)
+                                        t'      -> (t', bld)

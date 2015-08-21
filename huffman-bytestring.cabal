@@ -21,7 +21,7 @@ library
   exposed-modules:     Data.Compression.Huffman.ByteString
   -- other-modules:
   -- other-extensions:
-  build-depends:       base >=4 && <5
+  build-depends:       base >=4.7 && <5
                      , bits >= 0.3.2 && < 0.5
                      , bytestring >= 0.10.2.0 && < 0.11
                      , containers < 0.6
