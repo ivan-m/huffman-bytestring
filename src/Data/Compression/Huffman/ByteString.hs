@@ -141,7 +141,7 @@ assignCodes ((w0,l0):wls) = ((w0,c0):)
 -- raw 'Word' as we need to record the length, especially for the @0@
 -- code word case to know how long it is.
 data Code = C { code :: !Word
-              , cLen :: {-# UNPACK  #-} !Word16
+              , cLen :: {-# UNPACK  #-} !Int
               }
           deriving (Eq, Ord, Show, Read)
 
@@ -160,11 +160,12 @@ incCode c = C cw' l'
 
 padCode :: Word16 -> Code -> Code
 padCode l c
-  | cl >= l   = c
-  | otherwise = C (shiftL (code c) (fromIntegral $ l - cl)) l
+  | cl >= l'   = c
+  | otherwise = C (shiftL (code c) (l' - cl)) l'
   where
+    l' = fromIntegral l
     cl = cLen c
 
-binaryLength :: Word -> Word16
+binaryLength :: Word -> Int
 binaryLength 0 = 1
 binaryLength n = 1 + floor (logBase (2::Double) (fromIntegral n))
