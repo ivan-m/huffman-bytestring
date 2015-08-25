@@ -65,7 +65,7 @@ printHuffman = putStr . prettyHuffman
 createDictionary :: LazyByteString -> LazyByteString
 createDictionary = B.toLazyByteString
                    . mconcat
-                   . map B.word16LE
+                   . map B.word8
                    . canonicalLengths
                    . buildTree
                    . sortFreq
@@ -104,14 +104,21 @@ buildTree = go . P.fromAscList . map (uncurry Leaf)
                               in go (P.insert t p')
              _             -> error "Encoding: shouldn't happen."
 
+type CodeLen = Word8
+
 -- | Length of code in Huffman tree of each possible byte in order
 -- (i.e. the result should have a length of 256).
 --
--- Need to use 'Word16' here as in a pathological case, the length of
--- the code of the most unfrequent byte will be 256 (and hence
--- overflow a single Word8 value).
-canonicalLengths :: HuffmanTree -> [Word16]
+-- It suffices to use Word8 for each length as the longest code will
+-- be of length @|alphabet| - 1@ (maximum depth of binary a tree with
+-- @n@ nodes is @n-1@).  As the size of the alphabet is 256, the
+-- longest code will be of length 255 and hence will fit in a single
+-- Word8.
+canonicalLengths :: HuffmanTree -> [CodeLen]
 canonicalLengths = M.elems . go 0 blankLookup
+  -- We use a 'Map' here as we want to be sure we return the list in
+  -- order of the corresponding original input byte, so this way we
+  -- get the sorting.
   where
     go !d m (Leaf _ w)     = M.insert w d m
     go !d m (Node _ t1 t2) = let d1 = d + 1
@@ -142,20 +149,13 @@ calculateCodes = assignCodes
 
 -- Takes advantage of the fact that sortBy is a stable sort: the
 -- sorted result of @[(foo,len), (bar,len)]@ is the same.
-codeOrder :: [Word16] -> [(Word8, Word16)]
+codeOrder :: [CodeLen] -> [(Word8, CodeLen)]
 codeOrder = sortBy (compare `on` snd) . zip allBytes
 
-readInDict :: LazyByteString -> [Word16]
-readInDict bs = maybe (error "Provided dictionary should have even length")
-                      (const ls)
-                      mb
-  where
-    (mb, ls) = L.foldr go (Nothing,[]) bs
+readInDict :: LazyByteString -> [CodeLen]
+readInDict = L.unpack
 
-    go b (Nothing, ws) = (Just (fromIntegral b `shiftL` numBits), ws)
-    go b (Just w, ws)  = (Nothing, (fromIntegral b .|. w) : ws)
-
-assignCodes :: [(Word8, Word16)] -> [(Word8, Code)]
+assignCodes :: [(Word8, CodeLen)] -> [(Word8, Code)]
 assignCodes []            = error "Should be non-empty dictionary"
 assignCodes ((w0,l0):wls) = ((w0,c0):)
                             . snd
@@ -189,7 +189,7 @@ incCode c = C cw' l'
     -- re-calculate it.
     l' = binaryLength cw'
 
-padCode :: Word16 -> Code -> Code
+padCode :: CodeLen -> Code -> Code
 padCode l c
   | cl >= l'   = c
   | otherwise = C (shiftL (code c) (l' - cl)) l'
