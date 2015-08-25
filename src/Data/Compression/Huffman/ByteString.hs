@@ -21,10 +21,11 @@ import           Data.List       (foldl', mapAccumL, partition, sortBy)
 import qualified Data.Map        as M
 import qualified Data.PQueue.Min as P
 import           Data.Tuple      (swap)
-import           Data.Word       (Word, Word16, Word8)
+import           Data.Word       (Word8)
 
 #if !(MIN_VERSION_base(4,8,0))
 import Data.Monoid
+import Data.Word   (Word)
 #endif
 
 -- -----------------------------------------------------------------------------
