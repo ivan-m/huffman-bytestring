@@ -16,6 +16,7 @@ import qualified Data.ByteString.Lazy    as L
 import           Control.Arrow   (second, (***))
 import           Data.Bits
 import           Data.Bool       (bool)
+import           Data.Char       (chr)
 import           Data.Function   (on)
 import           Data.List       (foldl', mapAccumL, partition, sortBy)
 import qualified Data.Map        as M
@@ -70,6 +71,18 @@ createDictionary = B.toLazyByteString
                    . buildTree
                    . sortFreq
                    . freqCount
+
+-- | Pretty-print the resulting dictionary from the sample data
+-- provided.
+dictDebug :: LazyByteString -> IO ()
+dictDebug = mapM_ putStrLn
+            . zipWith (\w f -> show (chr $ fromIntegral w) ++ ": " ++ show f) allBytes
+            -- Not basing this on createDictionary in case types
+            -- change so this can work directly.
+            . canonicalLengths
+            . buildTree
+            . sortFreq
+            . freqCount
 
 data HuffmanTree = Node Int HuffmanTree HuffmanTree
                  | Leaf Int Word8
