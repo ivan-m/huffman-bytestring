@@ -233,3 +233,4 @@ decode (H { decoder = dt }) = B.toLazyByteString
     decodeBit (Branch lt rt, bld) b = case bool lt rt b of
                                         Value w -> (dt, bld `mappend` B.word8 w)
                                         t'      -> (t', bld)
+    decodeBit (Value w, _bld)    _b = error $ "Reached Value of " ++ show w ++ " too early!"
