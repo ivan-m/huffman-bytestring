@@ -10,11 +10,13 @@
  -}
 module Data.Compression.Huffman.ByteString where
 
-import qualified Data.ByteString.Builder as B
-import qualified Data.ByteString.Lazy    as L
+import qualified Data.Binary.Bits.Put    as BBP
+import qualified Data.Binary.Put         as BP
+import qualified Data.ByteString.Builder as BB
+import qualified Data.ByteString.Lazy    as BL
 
 import           Control.Arrow   (second, (***))
-import           Data.Bits
+import           Data.Bits       (finiteBitSize, shiftL, testBit)
 import           Data.Bool       (bool)
 import           Data.Char       (chr)
 import           Data.Function   (on)
@@ -22,6 +24,7 @@ import           Data.List       (foldl', mapAccumL, partition, sortBy)
 import qualified Data.Map        as M
 import qualified Data.PQueue.Min as P
 import           Data.Tuple      (swap)
+import qualified Data.Vector     as V
 import           Data.Word       (Word8)
 
 #if !(MIN_VERSION_base(4,8,0))
@@ -31,27 +34,22 @@ import Data.Word   (Word)
 
 -- -----------------------------------------------------------------------------
 
--- | Encode a tag using a static Huffman encoding tree.
-huffmanEncode :: LazyByteString -> LazyByteString
-huffmanEncode = error "still to be defined"
-
-type LazyByteString = L.ByteString
-
-type EncDict = ()
+type LazyByteString = BL.ByteString
 
 fromDictionary :: LazyByteString -> Huffman
-fromDictionary d = H { encoder = ()
-                     , decoder = dictionaryDecoder d
+fromDictionary d = H { encoder = dictionaryEncoder cs
+                     , decoder = dictionaryDecoder cs
                      }
+  where
+    cs = calculateCodes d
 
 data Huffman = H { encoder :: !EncDict
                  , decoder :: !DTree
                  }
-               deriving (Eq)
 
 prettyHuffman :: Huffman -> String
 prettyHuffman (H e d) = unlines [ "Encoder:"
-                                ,  show e
+                                ,  show (V.map (BP.runPut . BBP.runBitPut) e)
                                 ,  "Decoder:"
                                 ,  show d
                                 ]
@@ -64,9 +62,9 @@ printHuffman = putStr . prettyHuffman
 -- | Create the representation of a canonical Huffman encoding for all
 -- possible bytes using the sample data.
 createDictionary :: LazyByteString -> LazyByteString
-createDictionary = B.toLazyByteString
+createDictionary = BB.toLazyByteString
                    . mconcat
-                   . map B.word8
+                   . map BB.word8
                    . canonicalLengths
                    . buildTree
                    . sortFreq
@@ -97,7 +95,7 @@ treeFreq (Node f _ _) = f
 treeFreq (Leaf f _)   = f
 
 freqCount :: LazyByteString -> M.Map Word8 Int
-freqCount = L.foldl' go blankLookup
+freqCount = BL.foldl' go blankLookup
   where
     go m a = M.adjust succ a m
 
@@ -148,9 +146,6 @@ numBits = finiteBitSize (minBound :: Word8)
 
 -- -----------------------------------------------------------------------------
 
-readDictionary :: LazyByteString -> M.Map Word8 Code
-readDictionary = undefined
-
 -- | Construct the raw version of the dictionary from the canonical
 -- representation.
 --
@@ -166,7 +161,7 @@ codeOrder :: [CodeLen] -> [(Word8, CodeLen)]
 codeOrder = sortBy (compare `on` snd) . zip allBytes
 
 readInDict :: LazyByteString -> [CodeLen]
-readInDict = L.unpack
+readInDict = BL.unpack
 
 assignCodes :: [(Word8, CodeLen)] -> [(Word8, Code)]
 assignCodes []            = error "Should be non-empty dictionary"
@@ -216,14 +211,30 @@ binaryLength n = 1 + floor (logBase (2::Double) (fromIntegral n))
 
 -- -----------------------------------------------------------------------------
 
-dictionaryDecoder :: LazyByteString -> DTree
-dictionaryDecoder = codesToTree . calculateCodes
+dictionaryEncoder :: [(Word8, Code)] -> EncDict
+dictionaryEncoder = V.fromList . map (build . snd) . sortBy (compare `on` fst)
+  where
+    build (C c l) = mapM_ (BBP.putBool . testBit c) [0..l-1]
+
+type EncDict = V.Vector (BBP.BitPut ())
+
+encode :: Huffman -> LazyByteString -> LazyByteString
+encode (H { encoder = enc }) = BP.runPut
+                               . BBP.runBitPut
+                               . BL.foldl' (\b w -> b >> toB w) (return ())
+  where
+    toB = V.unsafeIndex enc . fromIntegral
+
+-- -----------------------------------------------------------------------------
+
+dictionaryDecoder :: [(Word8, Code)] -> DTree
+dictionaryDecoder = codesToTree
 
 data DTree = Branch DTree DTree
            | Value Word8
            deriving (Eq, Ord, Show, Read)
 
-codesToTree :: [(Word8,Code)] -> DTree
+codesToTree :: [(Word8, Code)] -> DTree
 codesToTree []      = error "Cannot create empty tree"
 codesToTree [(w,_)] = Value w
 codesToTree wcs     = uncurry Branch
@@ -241,13 +252,13 @@ codesToTree wcs     = uncurry Branch
 -- TODO: work out how to deal with trailing 0s on the end so we don't
 -- spuriously try to convert those to valid values.
 decode :: Huffman -> LazyByteString -> LazyByteString
-decode (H { decoder = dt }) = B.toLazyByteString
+decode (H { decoder = dt }) = BB.toLazyByteString
                               . snd
-                              . L.foldl' decodeByte (dt, mempty)
+                              . BL.foldl' decodeByte (dt, mempty)
   where
     decodeByte tb byte = foldl' decodeBit tb (map (testBit byte) [0..numBits - 1])
 
     decodeBit (Branch lt rt, bld) b = case bool lt rt b of
-                                        Value w -> (dt, bld `mappend` B.word8 w)
+                                        Value w -> (dt, bld `mappend` BB.word8 w)
                                         t'      -> (t', bld)
     decodeBit (Value w, _bld)    _b = error $ "Reached Value of " ++ show w ++ " too early!"
