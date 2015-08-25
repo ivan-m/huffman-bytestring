@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, CPP #-}
 
 {- |
    Module      : Data.Compression.Huffman.ByteString
@@ -19,10 +19,13 @@ import           Data.Bool       (bool)
 import           Data.Function   (on)
 import           Data.List       (foldl', mapAccumL, partition, sortBy)
 import qualified Data.Map        as M
-import           Data.Monoid
 import qualified Data.PQueue.Min as P
 import           Data.Tuple      (swap)
 import           Data.Word       (Word, Word16, Word8)
+
+#if !(MIN_VERSION_base(4,8,0))
+import Data.Monoid
+#endif
 
 -- -----------------------------------------------------------------------------
 
