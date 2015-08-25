@@ -32,6 +32,28 @@ huffmanEncode = error "still to be defined"
 
 type LazyByteString = L.ByteString
 
+type EncDict = ()
+
+fromDictionary :: LazyByteString -> Huffman
+fromDictionary d = H { encoder = ()
+                     , decoder = dictionaryDecoder d
+                     }
+
+data Huffman = H { encoder :: !EncDict
+                 , decoder :: !DTree
+                 }
+               deriving (Eq)
+
+prettyHuffman :: Huffman -> String
+prettyHuffman (H e d) = unlines [ "Encoder:"
+                                ,  show e
+                                ,  "Decoder:"
+                                ,  show d
+                                ]
+
+printHuffman :: Huffman -> IO ()
+printHuffman = putStr . prettyHuffman
+
 -- -----------------------------------------------------------------------------
 
 -- | Create the representation of a canonical Huffman encoding for all
@@ -45,15 +67,15 @@ createDictionary = B.toLazyByteString
                    . sortFreq
                    . freqCount
 
-data Huffman = Node Int Huffman Huffman
-             | Leaf Int Word8
-             deriving (Eq, Show, Read)
+data HuffmanTree = Node Int HuffmanTree HuffmanTree
+                 | Leaf Int Word8
+                 deriving (Eq, Show, Read)
 
 -- | Ordering solely by the frequency of the tree.
-instance Ord Huffman where
+instance Ord HuffmanTree where
   compare = compare `on` treeFreq
 
-treeFreq :: Huffman -> Int
+treeFreq :: HuffmanTree -> Int
 treeFreq (Node f _ _) = f
 treeFreq (Leaf f _)   = f
 
@@ -68,7 +90,7 @@ sortFreq = map swap
            . sortBy (compare `on` snd)
            . M.toAscList
 
-buildTree :: [(Int, Word8)] -> Huffman
+buildTree :: [(Int, Word8)] -> HuffmanTree
 buildTree = go . P.fromAscList . map (uncurry Leaf)
   where
     go p = case P.splitAt 2 p of
@@ -84,7 +106,7 @@ buildTree = go . P.fromAscList . map (uncurry Leaf)
 -- Need to use 'Word16' here as in a pathological case, the length of
 -- the code of the most unfrequent byte will be 256 (and hence
 -- overflow a single Word8 value).
-canonicalLengths :: Huffman -> [Word16]
+canonicalLengths :: HuffmanTree -> [Word16]
 canonicalLengths = M.elems . go 0 blankLookup
   where
     go !d m (Leaf _ w)     = M.insert w d m
@@ -177,6 +199,9 @@ binaryLength n = 1 + floor (logBase (2::Double) (fromIntegral n))
 
 -- -----------------------------------------------------------------------------
 
+dictionaryDecoder :: LazyByteString -> DTree
+dictionaryDecoder = codesToTree . calculateCodes
+
 data DTree = Branch DTree DTree
            | Value Word8
            deriving (Eq, Ord, Show, Read)
@@ -198,10 +223,10 @@ codesToTree wcs     = uncurry Branch
 
 -- TODO: work out how to deal with trailing 0s on the end so we don't
 -- spuriously try to convert those to valid values.
-decode :: DTree -> LazyByteString -> LazyByteString
-decode dt = B.toLazyByteString
-            . snd
-            . L.foldl' decodeByte (dt, mempty)
+decode :: Huffman -> LazyByteString -> LazyByteString
+decode (H { decoder = dt }) = B.toLazyByteString
+                              . snd
+                              . L.foldl' decodeByte (dt, mempty)
   where
     decodeByte tb byte = foldl' decodeBit tb (map (testBit byte) [0..numBits - 1])
 
